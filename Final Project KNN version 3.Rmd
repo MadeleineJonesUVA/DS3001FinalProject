@@ -1,0 +1,277 @@
+---
+title: 'Universities: Private or Public??'
+author: "Madeleine Jones, Audrey Himes, Hayden Ratliff"
+date: "12/01/2021"
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(class)
+library(plotly)
+library(RColorBrewer)
+library(ROCR)
+library(MLmetrics)
+library(ggpubr)
+library(DT)
+```
+
+### Question and Background
+(Question and background information on the data and why you are asking this question(s). References to previous research/evidence generally would be nice to include. – You must present your question to me during office hours, either next week on 26th or the following week on the 3rd)
+
+As college students attending a public university, the question of whether there are obvious differences between public and private universities is of particular interest.  On the surface, the only distinct difference is in university funding.  Public universities are funded by state governments while private universities rely on tuition and endowments.  However, this single difference can have implications in other areas such as the size of the student body or the tuition cost.  
+
+Given the potential differences across private and public universities, our questions are: Is is possible to predict whether a university is private or public based on attributes such as student-faculty ratio or tuition? And if so, what are the attributes with the greatest predictive importance?
+
+### Exploratory Data Analysis 
+#### Reading and Cleaning the Data 
+```{r}
+data<- read.csv("/Users/mj/Desktop/2021 Fall/DS 3001/DS-3001/Final Project/College_Data.csv")  # reading in the data set 
+
+
+data <- data %>% rename(College = X, AppsRecieved = Apps, AppsAccepted = Accept, NewStudentsEnrolled = Enroll, Top10Percent = Top10perc, Top25Percent = Top25perc, FullTimeUndergrads = F.Undergrad, PartTimeUndergrads = P.Undergrad, OutStateTuition = Outstate, RoomBoardCosts = Room.Board, BooksCost = Books, PersonalSpendings = Personal, FacultyPhDPercentage = PhD, FacultyTerminalPercentage = Terminal, StudentFacultyRatio = S.F.Ratio, DonatingAlumniPercentage = perc.alumni, ExpenditurePerStudent = Expend, GraduationRate = Grad.Rate)  # relabel the columns with more understandable names
+
+data$Private <- as.factor(data$Private)
+
+data$Private<-as.factor(ifelse(data$Private == "Yes",1,0))
+
+data <- data[complete.cases(data), 2:19]
+
+str(data)
+```
+
+
+#### Variable Summaries and Graphs {.tabset}
+##### Variable Averages by Unversity Type
+```{r}
+appsrec <- data.frame(data %>% group_by(Private) %>% summarise(AppsRecieved = mean(AppsRecieved)))
+appsacc <- data.frame(data %>% group_by(Private) %>% summarise(AppsAccepted = mean(AppsAccepted))) 
+enroll <- data.frame(data %>% group_by(Private) %>% summarise(NewStudentsEnrolled = mean(NewStudentsEnrolled))) 
+top10 <- data.frame(data %>% group_by(Private) %>% summarise(Top10Percent = mean(Top10Percent)))
+top25 <- data.frame(data %>% group_by(Private) %>% summarise(Top25Percent = mean(Top25Percent)))
+full <- data.frame(data %>% group_by(Private) %>% summarise(FullTimeUndergrads = mean(FullTimeUndergrads)))
+part <- data.frame(data %>% group_by(Private) %>% summarise(PartTimeUndergrads = mean(PartTimeUndergrads)))
+tuit <- data.frame(data %>% group_by(Private) %>% summarise(OutStateTuition = mean(OutStateTuition)))
+room <- data.frame(data %>% group_by(Private) %>% summarise(RoomBoardCosts = mean(RoomBoardCosts)))
+books <- data.frame(data %>% group_by(Private) %>% summarise(BooksCost = mean(BooksCost)))
+pers <- data.frame(data %>% group_by(Private) %>% summarise(PersonalSpendings = mean(PersonalSpendings)))
+phd <- data.frame(data %>% group_by(Private) %>% summarise(FacultyPhDPercentage = mean(FacultyPhDPercentage)))
+term <- data.frame(data %>% group_by(Private) %>% summarise(FacultyTerminalPercentage = mean(FacultyTerminalPercentage)))
+rat <- data.frame(data %>% group_by(Private) %>% summarise(StudentFacultyRatio = mean(StudentFacultyRatio)))
+don <- data.frame(data %>% group_by(Private) %>% summarise(DonatingAlumniPercentage = mean(DonatingAlumniPercentage)))
+exp <- data.frame(data %>% group_by(Private) %>% summarise(ExpenditurePerStudent = mean(ExpenditurePerStudent)))
+grad <- data.frame(data %>% group_by(Private) %>% summarise(GraduationRate = mean(GraduationRate)))
+
+comb_stats<- cbind(appsrec, appsacc, enroll, top10, top25, full, part, tuit, room, books, pers, phd, term, rat, don, exp, grad)
+comb_stats <- comb_stats[,c(1,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34)]
+comb_stats<- comb_stats %>% gather("Variable Mean Values", "value", 2:ncol(comb_stats)) %>%spread(Private, value) %>% rename("Public" = "0", "Private"="1")
+comb_stats$`Percent Difference` <- round((abs(comb_stats[,2]-comb_stats[,3])/comb_stats[,3])*100,digits=2)
+comb_stats <- arrange(comb_stats, -`Percent Difference`)
+datatable(comb_stats)
+```
+
+##### Notable Variable Distributions by University Type
+```{r}
+first<- ggplot(data, aes(x=FullTimeUndergrads, color=Private)) +
+  geom_histogram(fill = "white", position="dodge", bins = 10) + ggtitle("Full-Time Undergraduate Students") + theme_bw()
+
+sec<- ggplot(data, aes(x=PartTimeUndergrads, color=Private)) +
+  geom_histogram(fill = "white", position="dodge", bins = 10) + ggtitle("Part-Time Undergraduate Students")+ theme_bw()
+
+ggarrange(first, sec,
+                    ncol = 2, nrow = 1)
+
+third <- ggplot(data, aes(x=NewStudentsEnrolled, color=Private)) +
+  geom_histogram(fill = "white", position="dodge", bins = 10) + ggtitle("New Students Enrolled")+ theme_bw()
+
+fourth<- ggplot(data, aes(x=AppsAccepted, color=Private)) +
+  geom_histogram(fill = "white", position="dodge", bins = 10) + ggtitle("Numbers of Applications Accepted") + theme_bw()
+
+ggarrange(third, fourth,
+                    ncol = 2, nrow = 1)
+
+fifth<- ggplot(data, aes(x=AppsRecieved, color=Private)) +
+  geom_histogram(fill = "white", position="dodge", bins = 10) + ggtitle("Numbers of Applications Recieved") + theme_bw()
+
+ggarrange(fifth,
+                    ncol = 2, nrow = 1)
+
+```
+
+#### Exploratory Variable Analysis Conclusions
+First looking at the mean values table, the variables that have the greatest percent difference between private and public schools are the number of full-time undergraduate students, the number of part-time undergraduate students, the number of new students enrolled, the number of applications accepted, and the number of applications received.  
+
+To further investigate the deviations of these variables between public and private schools, we can examine their distributions. From the histograms, it appears that for all variable, private schools have distributions centered around smaller values.  This suggests that private schools may have a significantly smaller number of students and applications.  Given that these variables appear to differ the most between private and public schools, these variables may have the greatest importance in predicting whether a school is public or private.  
+
+### Methods
+In order to address our question of whether we can predict if a university is private or public, we will build a kNN model.  k-Nearest Neighbors, abbreviated kNN, is a supervised memory-based machine learning technique in which the classification of an observation is based on the majority of the "nearest neighbors," observations that have the most similar variable values.  In our case, the kNN model will classify universities as public or private based on whether the observations that have the most similar attributes, such as graduation rate and tuition, are public or private.  The first step to building a kNN model is training the model on a training data set that is separate from the tuning data set and the testing data set.  Separate training, tuning, and testing data sets are necessary to ensure that the model is evaluated on data that is independent from the data it was trained on.  The model will then be tuned using the tune set, and once the model is optimized, it will be evaluated using the test data set.  
+
+In order to address our question of which attributes have the greatest predictive importance in determining whether a university is public or private, we will examine the variable importance metrics for each attribute included in our model.  The variables with greater importance in our model are the variables that are most indicative of whether a university is public or private.  
+
+#### Creating Train, Tune, and Test Data Sets
+
+The data set observations will be split into train, tune, and test sets such that 60% of the data is used to train the kNN model, 20% of the data is used to tune the model, and 20% is used to test and evaluate the model. 
+
+```{r}
+#scale the data so kNN will operate correctly 
+scaled <- as.data.frame(scale(data[2:18], center = TRUE, scale = TRUE))
+
+scaled$Private <- data$Private #adding back in the label for caret
+
+
+set.seed(1)
+part_index_1 <- caret::createDataPartition(scaled$Private,  # split the data with a .6 probability so that 60% of the data is chosen
+                                           times=1,
+                                           p = 0.60,
+                                           groups=1,
+                                           list=FALSE)
+
+train <- data[part_index_1, ]  # subset the 60% chosen in the first partition into the train set
+tune_and_test <- data[-part_index_1, ]  # subset the remaining 7 in a tune and test set 
+set.seed(1)
+tune_and_test_index <- createDataPartition(tune_and_test$Private,  # now split the tune and test set 50-50
+                                           p = .5,
+                                           list = FALSE,
+                                           times = 1)
+
+tune <- tune_and_test[tune_and_test_index, ]  # subset the 50% chosen into the tune set
+test <- tune_and_test[-tune_and_test_index, ]  # subset the remaining 50% into the test set
+
+dims <- data.frame("Train" = nrow(train), "Tune" = nrow(tune), "Test" = nrow(test))  # create a dataframe of the sizes of each set and output the dataframe
+
+rownames(dims) = "Number of Observations"
+
+datatable(dims)
+```
+
+#### Prevalence as a Baseline
+Prevalence = 
+```{r}
+prevalence <- 1- table(data$`Private`)[[1]]/length(data$`Private`)
+prevalence
+```
+
+The positive class prevalence is 0.727, meaning that roughly 73% of the data is private universities.  We will use this metric as a baseline because a model that predicts solely the positive class, private universities, for every observation will be correct around 73% of the time.  Therefore, for our model to be useful, we are looking for an accuracy of greater than 0.73.
+
+#### Training and Tuning a kNN Model {.tabset}
+##### Training Model on Train Set
+Using the 467 observations in the train set, the model training has determined that 7 is the best number of nearest-neighbors to use in predicting whether an observation is private or public based on accuracy.   
+```{r}
+trctrl <- trainControl(method = "repeatedcv",
+                       number = 10,
+                       repeats = 3) # generic control to pass back into the knn mode using the cross validation method. 
+set.seed(1)
+knn_model <- train(Private~.,
+                  data = train,
+                  method="knn",
+                  tuneLength=10,
+                  trControl= trctrl,#cv method above, will select the optimal K
+                  preProcess="scale") #already did this but helpful reference
+
+knn_model
+
+```
+
+
+##### Tuning Model on Tune Set
+The trained kNN model is used to predict public and private universities on the tune set.  The results are summarized in the following confusion matrix.
+```{r}
+set.seed(1)
+tune_eval <-predict(knn_model, tune)
+
+set.seed(1)
+tune_eval_prob <- predict(knn_model, tune, type = "prob")  # gets the raw predicted probabilities
+
+tune_eval_prob$test <- tune$Private
+
+confusionMatrix(tune_eval, tune$Private, mode = "everything")
+```
+It appears that the accuracy is around 0.9161 and the F1 score is around 0.8354. Looking at the prediction vs reference matrix, the model predicts the positive class, private universities, extremely well with 109 out of 113 predictions correct.  It predicts the negative class, public universities, slightly less well with 33 out of 42 predictions correct.  In an attempt to better predict the negative class, we will increase the threshold above 0.5 so that observations with mid-range raw probabilities are more likely to be below threshold and thus predicted as the negative class, or public.   
+
+```{r}
+# function to take predictions, actual values, and threshold values and then output confusion matrix with those inputs
+adjust_thres <- function(x, y, z) {
+  set.seed(1)
+  #x=pred_probablities (continuous probs, not 1's and 0's), y=threshold, z=test_outcome
+  thres <- as.factor(ifelse(x > y, '1','0'))
+  confusionMatrix(as.factor(thres), as.factor(z), positive='1', dnn=c("Prediction", "Actual"), mode = "everything")
+}
+
+
+adjust_thres(tune_eval_prob$`1`,.6, tune$Private)  # evaluate with 0.6 threshold 
+
+
+```
+
+When the threshold is increased to 0.6, the accuracy is decreased slightly by 2% but the F1 score is increased greatly by 10%.  In addition, 3 more negative class observations have been classified correctly as public universities.  While the threshold adjustment has increased the number of positive class observations classified incorrectly as public, the model's overall predictive ability is more balanced between private and public universities.
+
+#### Result of kNN Model Building Method
+Evaluation will continue on the kNN model using k = 7 and a threshold of 0.6.  Evaluation of this model will be used to answer our questions of whether is it possible to predict if a university is private or public and which attributes are most important in this prediction.
+
+
+### Evaluation 
+#### Evaluate Model on Test Set using Key Metrics
+The kNN model has been used to predict private and public universities on the test set so that our evaluation data is independent of our training and tuning data.  The results are summarized in the confusion matrix below.
+```{r}
+test_eval_prob <- predict(knn_model, test, type = "prob")  # gets the raw predicted probabilities
+
+test_eval_prob$test <- test$Private
+
+adjust_thres(test_eval_prob$`1`,.6, test$Private) 
+```
+The model performs similarly well on the test set as it does the tune set.  This consistency in all performance metrics is indicative that our model is able to be generalized, and is not over-fit to the training or tuning sets.  The accuracy metric, the metric which our parameter k = 7 was chosen on, of roughly 91% indicates that broadly the model does an excellent job of classifying universities as public or private.
+
+However, given that our data set is not balanced in the target class, private vs public, this metric can overlook discrepancies between predicting capabilities on the positive and negative classes.  Therefore, instead of focusing on accuracy, we will look at F1 Score.  F1 Score uses the harmonic mean to evaluate accuracy which is more sensitive to imbalances between precision and sensitivity that result from an unbalanced target class as we have in our data set.  The F1 Score is roughly 94% for our model when predicting on the test set. This large F1 Score indicates that our model predicts well for both private and public universities.  
+
+Further, given that both our accuracy of 91% and F1 score of 94% are above our prevalence baseline of 73%, we can conclude that this model does have added benefits compared to a single-class predicting model.  Therefore, this model can be used to predict whether universities are public or private with significant confidence and ability.
+
+#### Evaluate Variable Importance Metric
+
+```{r}
+set.seed(1)
+varImp(knn_model)  # output the importance of each variable in learning the target variable on a scale from 0 to 100
+
+```
+The variables with greater importance have larger measures towards 100 while the variables with lesser importance have smaller measures towards 0.  In the kNN model predicting private and public universities, the metrics with the greatest importance are the number of full-time undergraduate students and out-of-state tuition,  while the metrics with the least importance are faculty PhD percentage, cost of books, percentage of students in the top 25% of their class, and faculty terminal percentage. 
+
+All of the variables identified in our initial exploratory data analysis that appeared to differ between private and public universities are important to the model.  The number of full-time undergraduate students has an importance metric of 100, the number of part-time undergraduate students has a metric of 84, the number of new students enrolled has a metric of 90, the number of applications accepted has a metric of 75, and the number of applications received has a metric of 72. These variables, along with the other variables of relatively high importance, contribute to a greater area under the ROC curve that compares sensitivity and specificity.  More area under the ROC curve indicates greater sensitivity and specificity measures, ultimately corresponding to a more accurate classifier model, such as our kNN model that classifies private vs public universities.  
+
+### Fairness Assessment
+
+### Conclusions 
+Our model does well at predicting private and public universities so in regards to the first question it is possible to predict whether a university is public or private. 
+
+To answer the second question, the variables will the greatest importance are the number of full-time undergraduate students, the out-of-state tuition, the number of new students enrolled, the number of part-time undergraduate students, the student to faculty ratio, the number of applications accepted, the number of applications received, and the percentage of alumni who donate.    
+
+### Future Work
+Limitations: 
+- Data set has information for 777 universities in the US, could be expanded to more
+- Data set only includes out-of-state tuition. Having tuition for in-state tuition could help increase the accuracy of our model further as in-state students normally pay much less for public schools than private schools.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
